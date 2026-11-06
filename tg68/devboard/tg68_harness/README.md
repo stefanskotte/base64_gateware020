@@ -61,7 +61,7 @@ program can be sent straight away.
 ## Results
 
 On hardware (2026-11-06, iCESugar-Pro v1.3, harness built with yowasp 0.70 /
-0.11, seed 1), all 36 checks pass. That covers 15 MB of fast RAM, three
+0.11, seeds 1 and 5), all 36 checks pass. That covers 15 MB of fast RAM, three
 patterns, each with the caches off and on, with 0 errors, and Chip RAM
 through the bridge with 0 errors. There were no unmapped motherboard cycles.
 The simulation's short variant gives the same per-loop timings.
@@ -82,3 +82,18 @@ other, not with SysInfo or AIBB.
 The Chip RAM figure depends on mobo.v's DTACK timing (two 7M clocks after
 AS), not on a real Gary. Chip RAM speed on an Amiga can only be measured in
 an Amiga.
+
+## Timing
+
+`build.py bit` runs `scripts/check_timing.py --strip dut.`, so the classes
+match the real build. Seed 5, the default, passes every class except 21
+single-clock paths, which fail by at most 0.67 ns. All 21 start at the
+`/HALT` input synchroniser (yosys names it `cpu_halt_in`) and end at the
+cache write-address and tag registers. In the harness, `/HALT` changes only
+while the power-up reset is releasing and the core is held in reset, so
+these paths never carry a live transition. Seeds 1-6 all fail the
+`/HALT` paths. Seeds 2, 4 and 6 also miss on kernel paths, so stay on 5
+unless the design changes.
+
+The harness is a functional test. The timing sign-off is still the real
+build (`scripts/build.py full`).

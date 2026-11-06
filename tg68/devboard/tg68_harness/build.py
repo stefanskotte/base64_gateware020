@@ -4,7 +4,7 @@
     python3 build.py rom          ROM loader -> build/rom.mem
     python3 build.py sw [--sim]   test program -> build/test.bin (--sim: short)
     python3 build.py sim          Verilator: loader + test program, full core
-    python3 build.py bit [--seed N]   bitstream -> build/tg68_harness.bit
+    python3 build.py bit [--seed N] [--seeds N]   bitstream -> build/tg68_harness.bit
 
 Load the bitstream with  openFPGALoader -c cmsisdap --vid 0x1d50 --pid 0x602b
 build/tg68_harness.bit  (or copy it to the iCELink drive), then run
@@ -147,7 +147,7 @@ def bit(seed, seeds=1):
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('what', choices=('rom', 'sw', 'sim', 'bit'))
 ap.add_argument('--sim', action='store_true', help='sw: build the short simulation variant')
-ap.add_argument('--seed', type=int, default=1)
+ap.add_argument('--seed', type=int, default=5)   # see README: Timing
 ap.add_argument('--seeds', type=int, default=1, help='bit: try seeds until check_timing passes')
 a = ap.parse_args()
 os.makedirs(OUT, exist_ok=True)
