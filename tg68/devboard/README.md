@@ -64,3 +64,10 @@ sudo python3 rawcopy_fat16.py /dev/rdiskN firmware.hex   # --dry-run to only pri
 
 Copying `.bit` files to the normal iCELink drive works with Finder or `cp`.
 Only the bootloader update needs this script.
+
+## tg68_harness: the whole 68020 build on the module
+
+`base64_tg68_top` runs on the bare module with a motherboard model inside
+the FPGA, a serial program loader, and a C test program covering 68020
+instructions, the caches, fast RAM and benchmarks. See
+[tg68_harness/README.md](tg68_harness/README.md).
