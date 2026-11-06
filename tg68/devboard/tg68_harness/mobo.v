@@ -22,6 +22,7 @@
 //   $DE000E R  last unmapped address [23:16]
 //   $DE0010 R  last unmapped address [15:0]
 //   $DE0012 R  harness id $B64D
+//   $DE0014 W  benchmark marker (read by the simulation's statistics)
 // Read data and DTACK follow tb_top's timing: DTACK two 7M clocks after AS.
 `default_nettype none
 module mobo #(
@@ -123,6 +124,7 @@ module mobo #(
 
     // ---- interrupts ------------------------------------------------------
     reg [2:0] ipl_lvl = 3'd0;
+    reg [7:0] mark = 8'd0;
     assign ipl_n = ~ipl_lvl;
 
     // ---- unmapped-cycle accounting ---------------------------------------
@@ -175,6 +177,7 @@ module mobo #(
                 if (c_reg) case (ca[4:1])
                     4'd0: begin tx_byte <= lo ? wd[7:0] : wd[15:8]; tx_go <= 1'b1; end
                     4'd4: ipl_lvl <= lo ? wd[2:0] : wd[10:8];
+                    4'd10: mark <= lo ? wd[7:0] : wd[15:8];
                     4'd5: begin ovl <= lo ? wd[0] : wd[8];
                                 led_ovr <= lo ? {wd[3:1] != 0, wd[3:1]} : {wd[11:9] != 0, wd[11:9]}; end
                     default: ;

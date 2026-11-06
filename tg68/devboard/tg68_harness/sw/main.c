@@ -226,16 +226,24 @@ static void bench(void)
         puts(c ? "Benchmarks, caches on\n" : "Benchmarks, caches off\n");
         t = micros(); for (u32 i = 0; i < n; i++) dst[i] = i; t = micros() - t;
         report("fast RAM write", BENCH_BYTES, t);
+        H_MARK = c ? 6 : 0;
         t = micros(); for (u32 i = 0; i < n; i++) sum += src[i]; t = micros() - t;
+        H_MARK = 0;
         report("fast RAM read ", BENCH_BYTES, t);
+        H_MARK = c ? 7 : 0;
         t = micros(); for (u32 i = 0; i < n; i++) dst[i] = src[i]; t = micros() - t;
+        H_MARK = 0;
         report("fast RAM copy ", BENCH_BYTES, t);
         t = micros(); for (u32 i = 0; i < 1024; i++) sum += ((volatile u32 *)0x1000)[i]; t = micros() - t;
         report("chip RAM read ", 4096, t);
+        H_MARK = c ? 1 : 0;
         t = micros(); u32 crc = crc32((const u8 *)0x08000000, CRC_BYTES); t = micros() - t;
+        H_MARK = 0;
         puts("  CRC32 "); putdec(CRC_BYTES); puts(" bytes, bitwise"); report("", 0, t);
         sink = crc;
+        H_MARK = c ? 2 : 0;
         t = micros(); u32 pr = sieve((u8 *)0x08600000, SIEVE_N); t = micros() - t;
+        H_MARK = 0;
         puts("  sieve to "); putdec(SIEVE_N); report("", 0, t);
         if (pr != SIEVE_PRIMES) { puts("  FAIL sieve count "); putdec(pr); putc('\n'); fails++; }
     }
@@ -285,15 +293,21 @@ static void bench_cache_size(void)
     puts("Cache-size benchmarks, caches on (bigcode is ");
     putdec((u32)bigcode_end - (u32)bigcode); puts(" bytes)\n");
     set_cacr(CACHES_ON);
+    H_MARK = 3;
     t = micros(); x = crc32_tab((const u8 *)0x08000000, CS_REPS * 512); t = micros() - t;
+    H_MARK = 0;
     sink = x; puts("  CRC32 table-driven, 1 KB table"); report("", CS_REPS * 512, t);
     volatile u32 *tab = (volatile u32 *)0x08700000;
     for (u32 i = 0; i < 1024; i++) tab[i] = i;
+    H_MARK = 4;
     t = micros(); x = table_sum(tab, 1024, CS_REPS); t = micros() - t;
+    H_MARK = 0;
     sink = x; puts("  sum 4 KB table"); report("", CS_REPS * 4096, t);
     t = micros(); x = table_sum(tab, 32, CS_REPS * 32); t = micros() - t;
     sink = x; puts("  sum 128 B table"); report("", CS_REPS * 4096, t);
+    H_MARK = 5;
     t = micros(); x = 1; for (u32 i = 0; i < CS_REPS * 2; i++) x = bigcode(x); t = micros() - t;
+    H_MARK = 0;
     sink = x; puts("  3 KB straight-line code"); report("", 0, t);
 }
 

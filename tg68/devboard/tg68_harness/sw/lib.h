@@ -16,6 +16,7 @@ typedef signed int     s32;
 #define H_UNM_HI REG16(0xDE000E)
 #define H_UNM_LO REG16(0xDE0010)
 #define H_ID     REG16(0xDE0012)
+#define H_MARK   REG16(0xDE0014)   // benchmark marker, for simulation statistics
 
 void putc(char c);
 void puts(const char *s);

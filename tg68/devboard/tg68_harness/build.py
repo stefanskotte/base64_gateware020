@@ -80,7 +80,8 @@ def sim(x16=False, ic_aw=12, dcache=1):
         f.write('%d\n' % len(pkt))
     vl = [tool('verilator'), '--binary', '--timing', '-Wno-fatal', '-Wno-lint', '-Wno-style',
           '-Wno-USEBEFOREDECL', '-O2', '--top-module', 'tb', '-DDEVBOARD', '-DSIM'] + \
-         (['-DX16'] if x16 else []) + ['-DIC_AW=%d' % ic_aw, '-DDCACHE=%d' % dcache] + [
+         (['-DX16'] if x16 else []) + ['-DIC_AW=%d' % ic_aw, '-DDCACHE=%d' % dcache] + \
+         (['-DSTATS'] if os.environ.get('STATS') else []) + [
           '-DPKT_LEN=%d' % len(pkt), '-DTMAX=%s' % os.environ.get('TMAX', '300ms'), '-o', 'tbh', '--Mdir', simdir(x16, ic_aw, dcache),
           os.path.join(HERE, 'sim', 'tb.sv'), os.path.join(HERE, 'harness_top.v'),
           os.path.join(HERE, 'mobo.v'), R('base64_tg68', 'base64_tg68_top.sv'),

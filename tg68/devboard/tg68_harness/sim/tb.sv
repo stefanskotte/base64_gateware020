@@ -85,6 +85,77 @@ module tb;
         if (dut.u_mobo.rx_valid && !pv) n_rxv = n_rxv + 1;
         if (dut.u_mobo.rx_ovr && !po) n_ovr = n_ovr + 1;
     end
+
+`ifdef STATS
+    // ---- cache-access statistics per benchmark (marker in mobo $DE0014) ----
+    // For each cache lookup: hit or miss, fetch or data, and whether its
+    // address is the previous same-kind access + 2 ("sequential"). Savings:
+    //   next-address prediction: 2 clocks (CLOOK+CCMP) per sequential hit
+    //   two-word entries (Glen): 2 clocks per sequential hit on the second
+    //     (odd) word of an aligned longword
+    localparam integer NB = 8;
+    integer st_clk [0:NB-1], st_step [0:NB-1], st_pf [0:NB-1];
+    integer st_lk [0:NB-1][0:1], st_hit [0:NB-1][0:1], st_seq [0:NB-1][0:1], st_odd [0:NB-1][0:1];
+    integer st_dir [0:NB-1], st_bus [0:NB-1];
+    reg [3:0]  q_p = 0;
+    reg [30:0] ka_p = 0; reg knwr_p = 1, kint_p = 0;
+    reg [30:0] last_a [0:1];
+    reg        cur_seq = 0, cur_odd = 0; integer cur_t = 0;
+    integer bi, bj;
+    initial begin
+        for (bi = 0; bi < NB; bi = bi + 1) begin
+            st_clk[bi] = 0; st_step[bi] = 0; st_pf[bi] = 0; st_dir[bi] = 0; st_bus[bi] = 0;
+            for (bj = 0; bj < 2; bj = bj + 1) begin
+                st_lk[bi][bj] = 0; st_hit[bi][bj] = 0; st_seq[bi][bj] = 0; st_odd[bi][bj] = 0;
+            end
+        end
+        last_a[0] = 0; last_a[1] = 0;
+    end
+    wire [3:0] q_n = dut.dut.cpu.q;
+    integer m;
+    always @(posedge clk) begin
+        m = dut.u_mobo.mark;
+        if (m >= NB) m = 0;
+        st_clk[m] = st_clk[m] + 1;
+        if (dut.dut.cpu.k_clkena) st_step[m] = st_step[m] + 1;
+        // a lookup starts: DECIDE -> CLOOK (a_r/cyc_fetch are the new values)
+        if (q_p == 4'd1 && q_n == 4'd7) begin
+            cur_t   = dut.dut.cpu.cyc_fetch ? 0 : 1;
+            cur_seq = (dut.dut.cpu.a_r[31:1] == last_a[cur_t] + 1);
+            cur_odd = cur_seq && dut.dut.cpu.a_r[1];
+            last_a[cur_t] = dut.dut.cpu.a_r[31:1];
+            st_lk[m][cur_t] = st_lk[m][cur_t] + 1;
+        end
+        // prefetch-buffer hit on the direct path: DECIDE -> FINISH, a read
+        if (q_p == 4'd1 && q_n == 4'd6 && knwr_p && !kint_p) begin
+            st_pf[m] = st_pf[m] + 1; last_a[1] = ka_p;
+        end
+        if (q_p == 4'd1 && q_n == 4'd9) begin st_dir[m] = st_dir[m] + 1; if (knwr_p) last_a[1] = ka_p; end
+        if (q_p == 4'd1 && q_n == 4'd2) st_bus[m] = st_bus[m] + 1;
+        // the tag compare
+        if (q_n == 4'd8 && dut.dut.cpu.ic_ok && dut.dut.cpu.ic_qt == dut.dut.cpu.ic_want
+            && (cur_t == 0 ? dut.dut.cpu.ic_on : dut.dut.cpu.dc_on)) begin
+            st_hit[m][cur_t] = st_hit[m][cur_t] + 1;
+            if (cur_seq) st_seq[m][cur_t] = st_seq[m][cur_t] + 1;
+            if (cur_odd) st_odd[m][cur_t] = st_odd[m][cur_t] + 1;
+            cur_seq = 0; cur_odd = 0;
+        end
+        q_p <= q_n; ka_p <= dut.dut.cpu.k_addr[31:1];
+        knwr_p <= dut.dut.cpu.k_nwr; kint_p <= dut.dut.cpu.internal_step;
+    end
+    task stats;
+        integer b, sp, sg;
+        $display("[stats] bench clocks steps | fetch: lookups hits seq odd | data: lookups hits seq odd | pf direct bus | save%%: predict glen");
+        for (b = 1; b < NB; b = b + 1) if (st_clk[b] > 0) begin
+            sp = 2 * (st_seq[b][0] + st_seq[b][1]);
+            sg = 2 * (st_odd[b][0] + st_odd[b][1]);
+            $display("[stats] %0d %0d %0d | %0d %0d %0d %0d | %0d %0d %0d %0d | %0d %0d %0d | %0.1f %0.1f",
+                     b, st_clk[b], st_step[b], st_lk[b][0], st_hit[b][0], st_seq[b][0], st_odd[b][0],
+                     st_lk[b][1], st_hit[b][1], st_seq[b][1], st_odd[b][1], st_pf[b], st_dir[b], st_bus[b],
+                     100.0 * sp / st_clk[b], 100.0 * sg / st_clk[b]);
+        end
+    endtask
+`endif
     integer i;
     initial begin
         wait (seen_banner);
@@ -94,6 +165,9 @@ module tb;
         wait (seen_result);
         repeat (20000) @(posedge clk);
         $display("[tb] unmapped motherboard cycles: %0d", dut.u_mobo.unm_cnt);
+`ifdef STATS
+        stats;
+`endif
         // lr is the module pin, active low: high = red LED off
         if (passed && lr) $display("SIM PASS"); else $display("SIM FAIL");
         $finish;
