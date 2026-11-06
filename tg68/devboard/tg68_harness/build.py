@@ -61,7 +61,13 @@ def sw(sim):
     run([m68k('objcopy'), '-O', 'binary', 'test.elf', 'test.bin'])
     print('  test.bin: %d bytes' % os.path.getsize(os.path.join(OUT, 'test.bin')))
 
-def sim(x16=False):
+def variant(x16, ic_aw, dcache):
+    return ('_x16' if x16 else '') + ('' if ic_aw == 12 else '_ic%d' % ic_aw) + ('' if dcache else '_nodc')
+
+def simdir(x16, ic_aw, dcache):
+    return 'obj_sim' + variant(x16, ic_aw, dcache)
+
+def sim(x16=False, ic_aw=12, dcache=1):
     rom()
     sw(True)
     # the bench feeds the program to the loader through the UART pin
@@ -74,8 +80,8 @@ def sim(x16=False):
         f.write('%d\n' % len(pkt))
     vl = [tool('verilator'), '--binary', '--timing', '-Wno-fatal', '-Wno-lint', '-Wno-style',
           '-Wno-USEBEFOREDECL', '-O2', '--top-module', 'tb', '-DDEVBOARD', '-DSIM'] + \
-         (['-DX16'] if x16 else []) + [
-          '-DPKT_LEN=%d' % len(pkt), '-DTMAX=%s' % os.environ.get('TMAX', '300ms'), '-o', 'tbh', '--Mdir', 'obj_sim16' if x16 else 'obj_sim',
+         (['-DX16'] if x16 else []) + ['-DIC_AW=%d' % ic_aw, '-DDCACHE=%d' % dcache] + [
+          '-DPKT_LEN=%d' % len(pkt), '-DTMAX=%s' % os.environ.get('TMAX', '300ms'), '-o', 'tbh', '--Mdir', simdir(x16, ic_aw, dcache),
           os.path.join(HERE, 'sim', 'tb.sv'), os.path.join(HERE, 'harness_top.v'),
           os.path.join(HERE, 'mobo.v'), R('base64_tg68', 'base64_tg68_top.sv'),
           R('base64_tg68', 'tg68_bus.v'), R('tg68', 'tg68_020_b0.v'),
@@ -86,10 +92,10 @@ def sim(x16=False):
     for f in ('turbomem.mem', 'sfsd.mem'):
         shutil.copy(R('base64_fx68k', f), OUT)
     run(vl, stdout=open(os.path.join(OUT, 'sim_build.log'), 'w'), stderr=subprocess.STDOUT)
-    run([os.path.join(OUT, 'obj_sim16' if x16 else 'obj_sim', 'tbh')])
+    run([os.path.join(OUT, simdir(x16, ic_aw, dcache), 'tbh')])
 
-def bit(seed, seeds=1, x16=False):
-    name = 'tg68_harness_x16' if x16 else 'tg68_harness'
+def bit(seed, seeds=1, x16=False, ic_aw=12, dcache=1):
+    name = 'tg68_harness' + variant(x16, ic_aw, dcache)
     rom()
     for f in ('turbomem.mem', 'sfsd.mem'):
         shutil.copy(R('base64_fx68k', f), OUT)
@@ -103,7 +109,7 @@ def bit(seed, seeds=1, x16=False):
     script = ['read_verilog -DDEVBOARD -sv ' + R('base64_tg68', 'base64_tg68_top.sv')] + \
              ['read_verilog -DDEVBOARD ' + f for f in srcs_v] + [
         'read_verilog -lib +/ecp5/cells_bb.v',
-        'chparam -set X16 %d harness_top' % (1 if x16 else 0),
+        'chparam -set X16 %d -set IC_AW %d -set DCACHE %d harness_top' % (1 if x16 else 0, ic_aw, dcache),
         'hierarchy -top harness_top',
         # the bridge asks for its pin registers to go in the I/O flip-flops;
         # here they drive mobo.v, not pins, so that cannot be honoured
@@ -153,8 +159,11 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument('what', choices=('rom', 'sw', 'sim', 'bit'))
 ap.add_argument('--sim', action='store_true', help='sw: build the short simulation variant')
 ap.add_argument('--x16', action='store_true', help='sim/bit: 16 master clocks per 7M (114.3 MHz)')
+ap.add_argument('--ic-aw', type=int, default=12, help='sim/bit: cache size, log2 words (12 = 8 KB, 7 = 256 B)')
+ap.add_argument('--no-dcache', action='store_true', help='sim/bit: instruction cache only (like a real 68020)')
 ap.add_argument('--seed', type=int, default=5)   # see README: Timing
 ap.add_argument('--seeds', type=int, default=1, help='bit: try seeds until check_timing passes')
 a = ap.parse_args()
 os.makedirs(OUT, exist_ok=True)
-{'rom': rom, 'sw': lambda: sw(a.sim), 'sim': lambda: sim(a.x16), 'bit': lambda: bit(a.seed, a.seeds, a.x16)}[a.what]()
+{'rom': rom, 'sw': lambda: sw(a.sim), 'sim': lambda: sim(a.x16, a.ic_aw, 0 if a.no_dcache else 1),
+ 'bit': lambda: bit(a.seed, a.seeds, a.x16, a.ic_aw, 0 if a.no_dcache else 1)}[a.what]()

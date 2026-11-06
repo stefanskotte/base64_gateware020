@@ -242,6 +242,61 @@ static void bench(void)
     sink = sum;
 }
 
+// ---------------------------------------------------------------------------
+// Cache-size benchmarks: working sets between 256 bytes (a real 68020's
+// I-cache) and 8 KB (this build's), so the cache size shows.
+#ifdef SIM
+#define CS_REPS 2
+#else
+#define CS_REPS 32
+#endif
+static u32 crc_tab[256];                        // 1 KB, reused for every byte
+static u32 crc32_tab(const u8 *p, u32 n)
+{
+    u32 c = 0xFFFFFFFF;
+    while (n--) c = crc_tab[(c ^ *p++) & 0xFF] ^ (c >> 8);
+    return ~c;
+}
+
+// ~3 KB of straight-line code: bigger than 256 bytes, well inside 8 KB
+#define OP(k) s = (s ^ (s >> 3)) + (u32)(k) * 0x9E3779B9u;
+#define R4(k)   OP(k) OP(k + 1) OP(k + 2) OP(k + 3)
+#define R16(k)  R4(k) R4(k + 4) R4(k + 8) R4(k + 12)
+#define R64(k)  R16(k) R16(k + 16) R16(k + 32) R16(k + 48)
+#define R256(k) R64(k) R64(k + 64) R64(k + 128) R64(k + 192)
+static __attribute__((noinline)) u32 bigcode(u32 s) { R256(1) return s; }
+static __attribute__((noinline)) u32 bigcode_end(void) { return 0; }
+
+static u32 table_sum(const volatile u32 *t, u32 words, u32 passes)
+{
+    u32 sum = 0;
+    while (passes--) for (u32 i = 0; i < words; i++) sum += t[i];
+    return sum;
+}
+
+static void bench_cache_size(void)
+{
+    u32 t, x;
+    for (u32 i = 0; i < 256; i++) {
+        u32 c = i;
+        for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320 & -(c & 1));
+        crc_tab[i] = c;
+    }
+    puts("Cache-size benchmarks, caches on (bigcode is ");
+    putdec((u32)bigcode_end - (u32)bigcode); puts(" bytes)\n");
+    set_cacr(CACHES_ON);
+    t = micros(); x = crc32_tab((const u8 *)0x08000000, CS_REPS * 512); t = micros() - t;
+    sink = x; puts("  CRC32 table-driven, 1 KB table"); report("", CS_REPS * 512, t);
+    volatile u32 *tab = (volatile u32 *)0x08700000;
+    for (u32 i = 0; i < 1024; i++) tab[i] = i;
+    t = micros(); x = table_sum(tab, 1024, CS_REPS); t = micros() - t;
+    sink = x; puts("  sum 4 KB table"); report("", CS_REPS * 4096, t);
+    t = micros(); x = table_sum(tab, 32, CS_REPS * 32); t = micros() - t;
+    sink = x; puts("  sum 128 B table"); report("", CS_REPS * 4096, t);
+    t = micros(); x = 1; for (u32 i = 0; i < CS_REPS * 2; i++) x = bigcode(x); t = micros() - t;
+    sink = x; puts("  3 KB straight-line code"); report("", 0, t);
+}
+
 int main(void)
 {
     puts("\nTG68 68020 harness test, harness id $"); puthex(H_ID, 4); putc('\n');
@@ -249,6 +304,7 @@ int main(void)
     test_cache();
     test_mem();
     bench();
+    bench_cache_size();
     if (n_other) { puts("unexpected exceptions: "); putdec(n_other); putc('\n'); fails++; }
     puts("passed "); putdec(passes); puts(", failed "); putdec(fails); putc('\n');
     if (fails) { puts("RESULT: FAIL "); putdec(fails); putc('\n'); }

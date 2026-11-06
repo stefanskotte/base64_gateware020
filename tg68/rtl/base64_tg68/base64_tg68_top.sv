@@ -87,6 +87,10 @@ module base64_tg68_top #(
     parameter integer TG_SETTLE  = 3,
     parameter integer TG_DIN     = 1,   // read data -> step (+1: see tg68_bus)
     parameter integer TG_ASU     = 1,   // address -> AS (+1 strobe register)
+    // TG68: cache geometry (tg68_bus IC_AW / DCACHE). 12 = 4096 words = 8 KB
+    // each for I and D; 7 = 256 bytes, a real 68020's I-cache size.
+    parameter integer TG_IC_AW   = 12,
+    parameter integer TG_DCACHE  = 1,
     // ---- speed ----------------------------------------------------------
     // 12 master clocks per 7M period. CPU_MULT must divide 12 evenly:
     //   6 -> 2 master clocks/CPU clock (42.6 MHz)  <-- target
@@ -803,7 +807,7 @@ module base64_tg68_top #(
     wire        fm_cfg_on;
     wire [7:0]  fm_cfg_match;
     tg68_bus #(.STEP(TG_STEP), .SETTLE(TG_SETTLE), .DIN_SETUP(TG_DIN),
-               .ADDR_SETUP(TG_ASU)) cpu (
+               .ADDR_SETUP(TG_ASU), .IC_AW(TG_IC_AW), .DCACHE(TG_DCACHE)) cpu (
         .clk      (clk),
         .enPhi1   (en_phi1),
         .enPhi2   (en_phi2),

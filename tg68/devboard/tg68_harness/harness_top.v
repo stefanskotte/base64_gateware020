@@ -13,7 +13,11 @@ module harness_top #(
     parameter integer BAUD      = 115_200,
     // X16=1: 16 master clocks per 7M instead of 12 (114.3 MHz instead of
     // 85.7 MHz, same 7.14 MHz 7M). Evaluation of the ICS570B x16 setting.
-    parameter         X16       = 1'b0
+    parameter         X16       = 1'b0,
+    // cache geometry: IC_AW 12 = 8 KB each (the build), 7 = 256 bytes;
+    // DCACHE 0 = instruction cache only, as on a real 68020
+    parameter integer IC_AW     = 12,
+    parameter integer DCACHE    = 1
 )(
     input  wire        clk_25m,
     output wire        uart_tx,
@@ -77,6 +81,7 @@ module harness_top #(
         .FORCE_RETRY_MS(0), .COLD_RETRY(1'b0), .PASSIVE_EN(1'b0),
         .PWRUP_BIT(PWRUP_BIT),
         .CLK_MULT(MULT), .CLK_HZ(CLK_HZ),
+        .TG_IC_AW(IC_AW), .TG_DCACHE(DCACHE),
         // x16: same nanoseconds where it matters, more clocks
         //   CPU_MULT must divide CLK_MULT (fx68k legacy, unused by TG68)
         //   STEP 5 = 43.8 ns for the kernel's ~41 ns internal paths

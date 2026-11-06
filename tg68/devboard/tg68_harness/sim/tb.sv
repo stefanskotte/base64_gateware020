@@ -27,7 +27,13 @@ module tb;
     wire lr, lg, lb;
     wire sd_cmd; wire [3:0] sd_d;
 
-    harness_top #(.PWRUP_BIT(12), .BAUD(BAUD), .X16(X16)) dut (
+`ifndef IC_AW
+`define IC_AW 12
+`endif
+`ifndef DCACHE
+`define DCACHE 1
+`endif
+    harness_top #(.PWRUP_BIT(12), .BAUD(BAUD), .X16(X16), .IC_AW(`IC_AW), .DCACHE(`DCACHE)) dut (
         .clk_25m(clk), .uart_tx(tx), .uart_rx(rx),
         .sdram_a(sa), .sdram_ba(sba), .sdram_dq(sdq), .sdram_dqm(sdqm),
         .sdram_clk(sclk), .sdram_cke(scke), .sdram_ras_n(sras),
