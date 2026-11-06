@@ -61,13 +61,14 @@ def sw(sim):
     run([m68k('objcopy'), '-O', 'binary', 'test.elf', 'test.bin'])
     print('  test.bin: %d bytes' % os.path.getsize(os.path.join(OUT, 'test.bin')))
 
-def variant(x16, ic_aw, dcache):
-    return ('_x16' if x16 else '') + ('' if ic_aw == 12 else '_ic%d' % ic_aw) + ('' if dcache else '_nodc')
+def variant(x16, ic_aw, dcache, predict=0):
+    return ('_x16' if x16 else '') + ('' if ic_aw == 12 else '_ic%d' % ic_aw) + ('' if dcache else '_nodc') \
+           + ('_pr' if predict else '')
 
-def simdir(x16, ic_aw, dcache):
-    return 'obj_sim' + variant(x16, ic_aw, dcache)
+def simdir(x16, ic_aw, dcache, predict=0):
+    return 'obj_sim' + variant(x16, ic_aw, dcache, predict)
 
-def sim(x16=False, ic_aw=12, dcache=1):
+def sim(x16=False, ic_aw=12, dcache=1, predict=0):
     rom()
     sw(True)
     # the bench feeds the program to the loader through the UART pin
@@ -80,9 +81,9 @@ def sim(x16=False, ic_aw=12, dcache=1):
         f.write('%d\n' % len(pkt))
     vl = [tool('verilator'), '--binary', '--timing', '-Wno-fatal', '-Wno-lint', '-Wno-style',
           '-Wno-USEBEFOREDECL', '-O2', '--top-module', 'tb', '-DDEVBOARD', '-DSIM'] + \
-         (['-DX16'] if x16 else []) + ['-DIC_AW=%d' % ic_aw, '-DDCACHE=%d' % dcache] + \
+         (['-DX16'] if x16 else []) + ['-DIC_AW=%d' % ic_aw, '-DDCACHE=%d' % dcache, ] + (['-DTG68_PREDICT'] if predict else []) + \
          (['-DSTATS'] if os.environ.get('STATS') else []) + [
-          '-DPKT_LEN=%d' % len(pkt), '-DTMAX=%s' % os.environ.get('TMAX', '300ms'), '-o', 'tbh', '--Mdir', simdir(x16, ic_aw, dcache),
+          '-DPKT_LEN=%d' % len(pkt), '-DTMAX=%s' % os.environ.get('TMAX', '300ms'), '-o', 'tbh', '--Mdir', simdir(x16, ic_aw, dcache, predict),
           os.path.join(HERE, 'sim', 'tb.sv'), os.path.join(HERE, 'harness_top.v'),
           os.path.join(HERE, 'mobo.v'), R('base64_tg68', 'base64_tg68_top.sv'),
           R('base64_tg68', 'tg68_bus.v'), R('tg68', 'tg68_020_b0.v'),
@@ -93,10 +94,10 @@ def sim(x16=False, ic_aw=12, dcache=1):
     for f in ('turbomem.mem', 'sfsd.mem'):
         shutil.copy(R('base64_fx68k', f), OUT)
     run(vl, stdout=open(os.path.join(OUT, 'sim_build.log'), 'w'), stderr=subprocess.STDOUT)
-    run([os.path.join(OUT, simdir(x16, ic_aw, dcache), 'tbh')])
+    run([os.path.join(OUT, simdir(x16, ic_aw, dcache, predict), 'tbh')])
 
-def bit(seed, seeds=1, x16=False, ic_aw=12, dcache=1):
-    name = 'tg68_harness' + variant(x16, ic_aw, dcache)
+def bit(seed, seeds=1, x16=False, ic_aw=12, dcache=1, predict=0):
+    name = 'tg68_harness' + variant(x16, ic_aw, dcache, predict)
     rom()
     for f in ('turbomem.mem', 'sfsd.mem'):
         shutil.copy(R('base64_fx68k', f), OUT)
@@ -107,8 +108,9 @@ def bit(seed, seeds=1, x16=False, ic_aw=12, dcache=1):
               ('autoconfig_zii', 'fastmem_zii', 'turbomem_zii', 'sd_subsystem', 'sdcard',
                'sdram_ctrl', 'fifo', 'shifter', 'rx_cpu_buf', 'tx_cpu_buf')]
     # same recipe as scripts/build.py, with DEVBOARD and the harness on top
-    script = ['read_verilog -DDEVBOARD -sv ' + R('base64_tg68', 'base64_tg68_top.sv')] + \
-             ['read_verilog -DDEVBOARD ' + f for f in srcs_v] + [
+    defs = '-DDEVBOARD' + (' -DTG68_PREDICT' if predict else '')
+    script = ['read_verilog %s -sv ' % defs + R('base64_tg68', 'base64_tg68_top.sv')] + \
+             ['read_verilog %s ' % defs + f for f in srcs_v] + [
         'read_verilog -lib +/ecp5/cells_bb.v',
         'chparam -set X16 %d -set IC_AW %d -set DCACHE %d harness_top' % (1 if x16 else 0, ic_aw, dcache),
         'hierarchy -top harness_top',
@@ -162,9 +164,10 @@ ap.add_argument('--sim', action='store_true', help='sw: build the short simulati
 ap.add_argument('--x16', action='store_true', help='sim/bit: 16 master clocks per 7M (114.3 MHz)')
 ap.add_argument('--ic-aw', type=int, default=12, help='sim/bit: cache size, log2 words (12 = 8 KB, 7 = 256 B)')
 ap.add_argument('--no-dcache', action='store_true', help='sim/bit: instruction cache only (like a real 68020)')
+ap.add_argument('--predict', action='store_true', help='sim/bit: next-address prediction in tg68_bus')
 ap.add_argument('--seed', type=int, default=5)   # see README: Timing
 ap.add_argument('--seeds', type=int, default=1, help='bit: try seeds until check_timing passes')
 a = ap.parse_args()
 os.makedirs(OUT, exist_ok=True)
-{'rom': rom, 'sw': lambda: sw(a.sim), 'sim': lambda: sim(a.x16, a.ic_aw, 0 if a.no_dcache else 1),
- 'bit': lambda: bit(a.seed, a.seeds, a.x16, a.ic_aw, 0 if a.no_dcache else 1)}[a.what]()
+{'rom': rom, 'sw': lambda: sw(a.sim), 'sim': lambda: sim(a.x16, a.ic_aw, 0 if a.no_dcache else 1, 1 if a.predict else 0),
+ 'bit': lambda: bit(a.seed, a.seeds, a.x16, a.ic_aw, 0 if a.no_dcache else 1, 1 if a.predict else 0)}[a.what]()

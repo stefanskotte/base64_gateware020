@@ -33,6 +33,7 @@ module tb;
 `ifndef DCACHE
 `define DCACHE 1
 `endif
+
     harness_top #(.PWRUP_BIT(12), .BAUD(BAUD), .X16(X16), .IC_AW(`IC_AW), .DCACHE(`DCACHE)) dut (
         .clk_25m(clk), .uart_tx(tx), .uart_rx(rx),
         .sdram_a(sa), .sdram_ba(sba), .sdram_dq(sdq), .sdram_dqm(sdqm),

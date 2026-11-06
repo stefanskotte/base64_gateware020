@@ -27,13 +27,15 @@ ap.add_argument('cfg', nargs='?', default='min', choices=CFGS)
 ap.add_argument('--seed', type=int, default=1)
 ap.add_argument('--seeds', type=int, default=8, help='try up to this many seeds (stops at the first that passes)')
 ap.add_argument('--skip-synth', action='store_true', help='reuse an existing yosys netlist')
+ap.add_argument('--predict', action='store_true',
+                help='build with TG68_PREDICT (next-address prediction in tg68_bus); output in build/<cfg>_predict')
 a = ap.parse_args()
 
 YOSYS = os.environ.get('YOSYS', 'yosys')
 NEXTPNR = os.environ.get('NEXTPNR', 'nextpnr-ecp5')
 ECPPACK = os.environ.get('ECPPACK', 'ecppack')
 fm, sd = CFGS[a.cfg]
-name = a.cfg
+name = a.cfg + ('_predict' if a.predict else '')
 out = os.path.join(ROOT, 'build', name)
 os.makedirs(out, exist_ok=True)
 for f in ('turbomem.mem', 'sfsd.mem'):        # $readmemh looks in the cwd
@@ -55,8 +57,9 @@ srcs_v = [R('base64_tg68', 'tg68_bus.v'), R('tg68', core)] + \
 
 if not a.skip_synth:
     print('== yosys  (%s: ENABLE_FASTMEM=%d ENABLE_SD=%d)' % (a.cfg, fm, sd))
-    script = '\n'.join(['read_verilog -sv ' + f for f in srcs_sv] +
-                       ['read_verilog ' + f for f in srcs_v] + [
+    dfl = '-DTG68_PREDICT ' if a.predict else ''
+    script = '\n'.join(['read_verilog %s-sv ' % dfl + f for f in srcs_sv] +
+                       ['read_verilog %s' % dfl + f for f in srcs_v] + [
         'read_verilog -lib +/ecp5/cells_bb.v',   # BB: the SD card input pins
         'chparam -set ENABLE_FASTMEM %d -set ENABLE_SD %d base64_tg68_top' % (fm, sd),
         # Keep the TG68 kernel and ALU as separate modules through

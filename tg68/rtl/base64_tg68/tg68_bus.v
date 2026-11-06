@@ -204,6 +204,40 @@ module tg68_bus #(
     // step, against 7+ for fast RAM and ~45 for the ROM over the 7M bus.
     // ------------------------------------------------------------------
     localparam integer IC_N  = 1 << IC_AW;
+`ifdef TG68_PREDICT
+    // ------------------------------------------------------------------
+    // TG68_PREDICT -- next-address prediction (a define, not a parameter:
+    // without it this file is the original text, and the released
+    // bitstreams stay reproducible bit for bit)
+    //
+    // A cache hit costs SETTLE + DECIDE + CLOOK + CCMP + FINISH, and the
+    // cache RAMs sit idle during SETTLE while the kernel's address settles.
+    // Over 90% of cache hits are to the previous access of the same kind
+    // plus one word (devboard/tg68_harness/SEQ_PREDICT.md). Here the RAMs
+    // are read at that predicted address during SETTLE (fetches from the
+    // instruction cache, data reads from the data cache, each with its own
+    // prediction); the data and tag are registered SETTLE-2 clocks after
+    // the step and the tag compared at SETTLE-1, so at DECIDE a hit needs
+    // only "kernel address == prediction" and goes straight to FINISH, like
+    // a prefetch-buffer hit: 2 clocks less. A wrong guess costs nothing:
+    // the normal lookup from the kernel's address runs as before.
+    //
+    // Coherency: a cache entry can only change under a prediction through a
+    // CPU write (fills always carry the memory contents). A write's cache
+    // update lands up to two clocks after its DECIDE, possibly on the edge
+    // the speculative read uses, so any write to a predicted word kills
+    // that prediction until the next access of its kind. (With the current
+    // pacing the update always lands earlier; the kill is a safety net.)
+    // Needs SETTLE >= 3 (read, register, compare).
+    // ------------------------------------------------------------------
+    reg  [31:1]      pr_f = 31'd0, pr_d = 31'd0;    // predicted next fetch / data read
+    reg  [15:0]      pr_fd, pr_dd;                  // speculative data and tags
+    reg  [TAGW-1:0]  pr_ft, pr_dt;
+    reg              pr_fh = 1'b0, pr_dh = 1'b0;    // ...and their tag hits
+    reg              pr_fk = 1'b0, pr_dk = 1'b0;    // killed by a write
+    reg              pr_rs = 1'b1;  // == (q == Q_SETTLE), as its own register:
+                                    // it steers the cache RAM read address
+`endif
     localparam integer TAGW  = 1 + 2 + (23 - IC_AW);     // valid, region, a[23:IC_AW+1]
 
     (* ram_style = "block" *) reg [15:0]     ic_data [0:IC_N-1];
@@ -215,6 +249,16 @@ module tg68_bus #(
     end
 
     wire [IC_AW-1:0] ic_ra = k_addr[IC_AW:1];
+`ifdef TG68_PREDICT
+    // during SETTLE the read ports look up the predictions instead
+    wire [IC_AW-1:0] pr_ic_ra = pr_rs ? pr_f[IC_AW:1] : ic_ra;
+    wire [IC_AW-1:0] pr_dc_ra = pr_rs ? pr_d[IC_AW:1] : ic_ra;
+`define TG_IC_RA pr_ic_ra
+`define TG_DC_RA pr_dc_ra
+`else
+`define TG_IC_RA ic_ra
+`define TG_DC_RA ic_ra
+`endif
     reg  [15:0]      ic_dq;
     reg  [TAGW-1:0]  ic_tq;
     reg              ic_we = 1'b0;
@@ -222,8 +266,8 @@ module tg68_bus #(
     reg  [15:0]      ic_wd;
     reg  [TAGW-1:0]  ic_wt;
     always @(posedge clk) begin
-        ic_dq <= ic_data[ic_ra];
-        ic_tq <= ic_tag[ic_ra];
+        ic_dq <= ic_data[`TG_IC_RA];
+        ic_tq <= ic_tag[`TG_IC_RA];
         if (ic_we) begin
             ic_data[ic_wa] <= ic_wd;
             ic_tag[ic_wa]  <= ic_wt;
@@ -301,8 +345,8 @@ module tg68_bus #(
             dc_tag[i]  = {TAGW{1'b0}};
         end
         always @(posedge clk) begin
-            dq <= dc_data[ic_ra];
-            tq <= dc_tag[ic_ra];
+            dq <= dc_data[`TG_DC_RA];
+            tq <= dc_tag[`TG_DC_RA];
             if (dc_we) begin
                 dc_data[dc_wa] <= dc_wd;
                 dc_tag[dc_wa]  <= dc_wt;
@@ -499,6 +543,9 @@ module tg68_bus #(
             stalled  <= 1'b0;
             wd       <= 24'd0;
             q        <= Q_SETTLE;
+`ifdef TG68_PREDICT
+            pr_rs    <= 1'b1;
+`endif
             if (cnt >= STEP - 1) begin
                 k_clkena <= 1'b1;
                 cnt      <= 6'd0;
@@ -513,6 +560,18 @@ module tg68_bus #(
             // takes its data from dp_q or iEdb.) pf_fill and pw_upd never
             // fall on the same clock: a posted write needs the port idle at
             // DECIDE, which is at the earliest the clock pf_fill is set.
+`ifdef TG68_PREDICT
+            if (q == Q_SETTLE) begin
+                if (cnt == SETTLE - 2) begin
+                    pr_fd <= ic_dq; pr_ft <= ic_tq;
+                    pr_dd <= dc_dq; pr_dt <= dc_tq;
+                end
+                if (cnt == SETTLE - 1) begin
+                    pr_fh <= (pr_ft == tag_of(pr_f));
+                    pr_dh <= (pr_dt == tag_of(pr_d));
+                end
+            end
+`endif
             if (pf_fill) begin
                 pf_fill <= 1'b0;
                 dc_wa <= pf_a[IC_AW:1]; dc_wt <= tag_of(pf_a); dc_wd <= dp_q;
@@ -531,7 +590,11 @@ module tg68_bus #(
             end
             case (q)
             // ----------------------------------------------------------
+`ifdef TG68_PREDICT
+            Q_SETTLE: if (cnt >= SETTLE - 1) begin q <= Q_DECIDE; pr_rs <= 1'b0; end
+`else
             Q_SETTLE: if (cnt >= SETTLE - 1) q <= Q_DECIDE;
+`endif
             // ----------------------------------------------------------
             Q_DECIDE: begin
                 // nResetOut is combinational in the kernel; only trust it
@@ -547,6 +610,25 @@ module tg68_bus #(
                     bus_berr <= 1'b0;
                     tmr      <= 6'd0;
                     q        <= Q_FINISH;
+`ifdef TG68_PREDICT
+                    pr_d     <= k_addr[31:1] + 31'd1; pr_dk <= 1'b0;
+                end else if (k_bs == 2'b00 && ic_on && pr_fh && !pr_fk
+                             && k_addr[31:1] == pr_f) begin
+                    // predicted fetch, looked up during SETTLE: a hit
+                    k_din    <= pr_fd;
+                    bus_berr <= 1'b0;
+                    tmr      <= 6'd0;
+                    q        <= Q_FINISH;
+                    pr_f     <= k_addr[31:1] + 31'd1;
+                end else if (k_bs == 2'b10 && k_nwr && dc_on && (k_fast || k_rom)
+                             && pr_dh && !pr_dk && k_addr[31:1] == pr_d) begin
+                    // predicted data read: a hit
+                    k_din    <= pr_dd;
+                    bus_berr <= 1'b0;
+                    tmr      <= 6'd0;
+                    q        <= Q_FINISH;
+                    pr_d     <= k_addr[31:1] + 31'd1;
+`endif
                 end else if (bus_free && ack_idle && (!dp_busy || (k_look && !pf_wait))) begin
                     a_r      <= k_addr[31:1];
                     fc_r     <= k_fc;
@@ -557,6 +639,14 @@ module tg68_bus #(
                     tmr      <= 6'd0;
                     cyc_fetch <= (k_bs == 2'b00);
                     dp_fast   <= k_fast;
+`ifdef TG68_PREDICT
+                    if (k_bs == 2'b00) begin pr_f <= k_addr[31:1] + 31'd1; pr_fk <= 1'b0; end
+                    if (k_bs == 2'b10 && k_nwr) begin pr_d <= k_addr[31:1] + 31'd1; pr_dk <= 1'b0; end
+                    if (!k_nwr) begin   // a write: drop predictions of this word
+                        if (k_addr[31:1] == pr_f) pr_fk <= 1'b1;
+                        if (k_addr[31:1] == pr_d) pr_dk <= 1'b1;
+                    end
+`endif
                     // the port's write data belong to a request still in
                     // flight, if there is one
                     if (!dp_busy) begin
@@ -738,7 +828,11 @@ module tg68_bus #(
             // motherboard copy for one more clock. They change only when
             // the next cycle is set up, >= SETTLE clocks from now.
             Q_FINISH: if (tmr >= DIN_SETUP - 1 && cnt >= STEP - 1) step();
+`ifdef TG68_PREDICT
+            default: begin q <= Q_SETTLE; pr_rs <= 1'b1; end
+`else
             default: q <= Q_SETTLE;
+`endif
             endcase
 
             // Posted writes and prefetches complete in the background. (A
@@ -801,6 +895,9 @@ module tg68_bus #(
             k_ipl    <= {IPL2n, IPL1n, IPL0n};
             k_berr   <= 1'b0;     // the kernel samples the old value here
             q        <= Q_SETTLE;
+`ifdef TG68_PREDICT
+            pr_rs    <= 1'b1;
+`endif
         end
     endtask
 
@@ -814,4 +911,6 @@ module tg68_bus #(
 
 endmodule
 
+`undef TG_IC_RA
+`undef TG_DC_RA
 `default_nettype wire

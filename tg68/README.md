@@ -182,6 +182,21 @@ Boots from SD exactly like the fx68k build. Same `Mask` advice applies
   landing on a mirror of the ROM. CPU-space cycles (FC=7, interrupt
   acknowledge) still go to Gary.
 
+## Experimental: next-address prediction (`--predict`)
+
+`python3 scripts/build.py full --predict` builds with `TG68_PREDICT`. During
+the SETTLE clocks, the instruction and data caches look up the previous
+access of the same kind plus one word. When the kernel's address turns out
+to be that word and the lookup hit, the access skips CLOOK and CCMP: a cache
+hit costs 5 clocks instead of 7. Without `--predict`, `tg68_bus.v` is the
+original text, and `full --seed 3` still reproduces step 4 bit for bit.
+
+Measured on the dev-board harness (iCESugar-Pro, no Amiga), caches on, 12x:
+1.23-1.34x on CPU-bound code, 1.18-1.25x on fast RAM, 1.08x on Chip RAM.
+All the harness checks pass, and so do `sim/run.sh` top, fastmem and the
+benches with `VLFLAGS=-DTG68_PREDICT`. **Not yet tested in an Amiga.**
+Details: `devboard/tg68_harness/PREDICT.md`.
+
 ## Cold boot
 
 The fx68k build found that its first boot attempt always double bus faults

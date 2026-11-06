@@ -176,6 +176,44 @@ static void test_cache(void)
         for (int j = 0; j < 4; j++) sum += fn();
     }
     check("self-modifying code (I-cache)", sum, 4 * (1 + 2 + 3));
+    // patch an instruction a few words ahead of the PC, then run into it
+    // (sequential fetches: the case next-address prediction must not get
+    // wrong). Beyond the kernel's own prefetch, so the new one must run.
+    u32 r;
+    __asm__ volatile (
+        "   lea     1f(%%pc),%%a0\n"
+        "   move.w  #0x7005,(%%a0)\n"   /* moveq #5,d0 over the moveq #1 */
+        "   nop\n   nop\n   nop\n   nop\n"
+        "1: moveq   #1,%%d0\n"
+        "   move.l  %%d0,%0\n"
+        "   lea     1b(%%pc),%%a0\n"
+        "   move.w  #0x7001,(%%a0)\n"   /* put the original back */
+        : "=d"(r) : : "d0", "a0", "memory");
+    check("patch the code just ahead", r, 5);
+    // the same at distances 0..4 words: what runs depends on the kernel's
+    // prefetch, but it must not depend on PREDICT (compare the two builds)
+#define PATCH_AT(N) __asm__ volatile ( \
+        "   lea     1f(%%pc),%%a0\n" \
+        "   move.w  #0x7005,(%%a0)\n" \
+        "   .rept " #N "\n   nop\n   .endr\n" \
+        "1: moveq   #1,%%d0\n" \
+        "   move.l  %%d0,%0\n" \
+        "   lea     1b(%%pc),%%a0\n" \
+        "   move.w  #0x7001,(%%a0)\n" \
+        : "=d"(r) : : "d0", "a0", "memory"); puts(" "); putdec(r);
+    puts("  patch at distance 0..4 runs:");
+    PATCH_AT(0) PATCH_AT(1) PATCH_AT(2) PATCH_AT(3) PATCH_AT(4)
+    putc('\n');
+    // data: read a word, write the next one, read it straight back
+    volatile u16 *w = (volatile u16 *)0x08300000;
+    for (int i = 0; i < 64; i++) w[i] = 0x1000 + i;
+    u32 bad = 0;
+    for (int i = 0; i < 63; i++) {
+        u16 a = w[i];
+        w[i + 1] = a ^ 0x5A5A;
+        if (w[i + 1] != (u16)(a ^ 0x5A5A)) bad++;
+    }
+    check("read, write next, read it back", bad, 0);
     volatile u32 *p = (volatile u32 *)0x08200000;
     p[0] = 0xCAFEF00D; (void)p[0];
     ((volatile u8 *)p)[1] = 0x55;          // byte write over a cached long

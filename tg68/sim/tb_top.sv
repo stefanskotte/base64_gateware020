@@ -97,6 +97,13 @@ module tb;
     always @(posedge dut.clk)
         if (dut.cpu.q == 4'd8 && !dut.cpu.cyc_fetch && dut.cpu.ic_ok
             && dut.cpu.ic_qt == dut.cpu.ic_want && dut.cpu.dc_on) dc_hits = dc_hits + 1;
+`ifdef TG68_PREDICT
+    // predicted data hits go DECIDE -> FINISH and never reach CCMP
+    always @(posedge dut.clk)
+        if (dut.cpu.q == 4'd1 && dut.cpu.k_bs == 2'b10 && dut.cpu.k_nwr && dut.cpu.dc_on
+            && dut.cpu.pr_dh && !dut.cpu.pr_dk && dut.cpu.k_addr[31:1] == dut.cpu.pr_d
+            && !dut.cpu.k_pf_hit) dc_hits = dc_hits + 1;
+`endif
     always @(negedge as_n) if (ba[23:19] == 5'b11111) romf = romf + 1;
     reg [2:0] w = 0;
     reg       busy = 0;
