@@ -18,3 +18,4 @@ sw/maprom/*.o
 sw/maprom/*.elf
 sw/maprom/*.bin
 __pycache__/
+devboard/sdram_test/build/
