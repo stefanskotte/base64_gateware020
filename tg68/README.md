@@ -194,7 +194,8 @@ original text, and `full --seed 3` still reproduces step 4 bit for bit.
 Measured on the dev-board harness (iCESugar-Pro, no Amiga), caches on, 12x:
 1.23-1.34x on CPU-bound code, 1.18-1.25x on fast RAM, 1.08x on Chip RAM.
 All the harness checks pass, and so do `sim/run.sh` top, fastmem and the
-benches with `VLFLAGS=-DTG68_PREDICT`. **Not yet tested in an Amiga.**
+benches with `VLFLAGS=-DTG68_PREDICT`. `full --predict --seed 29` passes
+check_timing.py with +0.43 ns. **Not yet tested in an Amiga.**
 Details: `devboard/tg68_harness/PREDICT.md`.
 
 ## Cold boot

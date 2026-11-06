@@ -67,5 +67,11 @@ Glen's own benches in simulation, PREDICT off -> on:
   fail without prediction too: the /HALT synchroniser, `dp_req` -> SDRAM,
   and the kernel clkena fan-out, depending on seed.
 
+**Base64 build:** `scripts/build.py full --predict --seed 29` passes
+check_timing.py. Worst slack +0.43 ns (adapter ctrl -> logic), about the
+same margin as released step 4 (+0.45 ns). Seeds 1-28 missed by 0.02-3 ns
+on existing SDRAM, bridge and clkena paths. The bitstreams are in
+`bitstreams/step5_predict/` on this branch, plain and fast.
+
 Build: `python3 build.py bit --predict` (harness) or
 `python3 scripts/build.py full --predict` (Base64).
