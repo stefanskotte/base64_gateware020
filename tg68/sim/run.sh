@@ -15,7 +15,7 @@ AS="m68k-linux-gnu-as -m68020"; LD="m68k-linux-gnu-ld -Ttext=0"; OC="m68k-linux-
 mem() { python3 -I -c "
 d=open('$1','rb').read(); d+=bytes(8192-len(d))
 open('$2','w').write('\n'.join('%02x%02x'%(d[i],d[i+1]) for i in range(0,8192,2))+'\n')"; }
-VL="verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -O2 --top-module tb"
+VL="verilator --binary --timing -Wno-fatal -Wno-USEBEFOREDECL -Wno-lint -Wno-style -O2 --top-module tb"
 SLAVES="$R/base64_fx68k/autoconfig_zii.v $R/base64_fx68k/fastmem_zii.v $R/base64_fx68k/turbomem_zii.v \
  $R/base64_fx68k/sd_subsystem.v $R/base64_fx68k/sdcard.v $R/base64_fx68k/sdram_ctrl.v $R/base64_fx68k/fifo.v \
  $R/base64_fx68k/shifter.v $R/base64_fx68k/rx_cpu_buf.v $R/base64_fx68k/tx_cpu_buf.v"
