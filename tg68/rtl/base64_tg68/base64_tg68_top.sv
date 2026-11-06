@@ -224,7 +224,18 @@ module base64_tg68_top #(
 
     // 68000 socket (3.3V side of the CBTD switches)
     output wire [23:1] cpu_a,
+`ifdef DEVBOARD
+    // TG68: dev-board harness (tg68/devboard/tg68_harness). The motherboard
+    // is a model inside the same FPGA, and yosys cannot keep tristates
+    // between modules, so the shared nets are split into drive/enable/read.
+    output wire [15:0] cpu_d,         // bridge data, valid while cpu_d_oe
+    output wire        cpu_d_oe,
+    input  wire [15:0] cpu_d_in,      // resolved data bus
+    input  wire        cpu_reset_in,  // resolved /RESET (wired-AND)
+    input  wire        cpu_halt_in,   // resolved /HALT
+`else
     inout  wire [15:0] cpu_d,
+`endif
     output wire        cpu_as_n,
     output wire        cpu_uds_n,
     output wire        cpu_lds_n,
@@ -239,8 +250,13 @@ module base64_tg68_top #(
     input  wire        cpu_br_n,
     input  wire        cpu_bgack_n,
     input  wire [2:0]  cpu_ipl_n,
+`ifdef DEVBOARD
+    output wire        cpu_reset_n,   // TG68: 0 = we pull /RESET low
+    output wire        cpu_halt_n,
+`else
     inout  wire        cpu_reset_n,   // open-drain bidirectional
     inout  wire        cpu_halt_n,    // open-drain bidirectional
+`endif
 
     // Autoconfig daisy chain (J2). CFGIN jumpered to GND = first in chain.
     input  wire        cfgin_n,
@@ -274,6 +290,19 @@ module base64_tg68_top #(
 );
 
     wire clk = clk_12x;
+    // TG68: the values read back from the bidirectional nets. DEVBOARD
+    // splits them; on the real board they are the pins themselves. Macros,
+    // not wires: a new wire renames nets, which moves nextpnr's placement,
+    // and the released bitstreams must stay reproducible bit for bit.
+`ifdef DEVBOARD
+`define TG_D_RD     cpu_d_in
+`define TG_RESET_RD cpu_reset_in
+`define TG_HALT_RD  cpu_halt_in
+`else
+`define TG_D_RD     cpu_d
+`define TG_RESET_RD cpu_reset_n
+`define TG_HALT_RD  cpu_halt_n
+`endif
 
     // Master clocks per emulated CPU clock period, and the phi2 offset.
     // Sized localparams throughout: part-selecting an `integer` parameter is
@@ -397,8 +426,8 @@ module base64_tg68_top #(
         s_berr_n  <= {s_berr_n[0],  cpu_berr_n};
         s_br_n    <= {s_br_n[0],    cpu_br_n};
         s_bgack_n <= {s_bgack_n[0], cpu_bgack_n};
-        s_reset_n <= {s_reset_n[0], cpu_reset_n};
-        s_halt_n  <= {s_halt_n[0],  cpu_halt_n};
+        s_reset_n <= {s_reset_n[0], `TG_RESET_RD};
+        s_halt_n  <= {s_halt_n[0],  `TG_HALT_RD};
         s_cfgin_n <= {s_cfgin_n[0], cfgin_n};
         s_7m      <= {s_7m[0],      s_7m_fall};
         s_ipl_a   <= cpu_ipl_n;
@@ -700,10 +729,16 @@ module base64_tg68_top #(
                                        core_halted},                     // $F002
                               16'h544D };                              // $F000
 
+`ifdef DEVBOARD
+    // TG68: push-pull towards the harness, which ANDs in its own pull-downs
+    assign cpu_reset_n = ~(~core_oreset_n | rst_stretch | cold_rst | rtry_rst);
+    assign cpu_halt_n  = ~(~core_ohalted_n | cold_rst | rtry_rst);
+`else
     assign cpu_reset_n = (~core_oreset_n | rst_stretch | cold_rst | rtry_rst)
                          ? 1'b0 : 1'bz;
     assign cpu_halt_n  = (~core_ohalted_n | cold_rst | rtry_rst)
                          ? 1'b0 : 1'bz;
+`endif
 
     // ========================================================================
     // 8. fx68k core
@@ -993,7 +1028,7 @@ module base64_tg68_top #(
             // slave guarantees data valid once it asserts DTACK, so the live
             // bus is the right thing to present. Still freezes at AS negation.
             if (bx_rw && ((st == ST_S6) || (st == ST_VPAE && e_pin)))
-                rd_data <= cpu_d;
+                rd_data <= `TG_D_RD;
 
             // ---- delayed sample of the motherboard's response ------------
             // Reading the 2FF output DTACK_LAT clocks after the nominal S4
@@ -1183,8 +1218,13 @@ module base64_tg68_top #(
     assign cpu_rw    = bus_owned ? (RETIME ? rt_rw    : p_rw)    : 1'bz;
     assign cpu_fc    = bus_owned ? (RETIME ? rt_fc    : p_fc)    : 3'bz;
     assign cpu_vma_n = bus_owned ? (RETIME ? rt_vma_n : p_vma_n) : 1'bz;
+`ifdef DEVBOARD
+    assign cpu_d     = RETIME ? rt_d : p_d;
+    assign cpu_d_oe  = bus_owned & (RETIME ? rt_d_oe : p_d_oe);
+`else
     assign cpu_d     = RETIME ? ((bus_owned & rt_d_oe) ? rt_d : 16'bz)
                               : ((bus_owned & p_d_oe)  ? p_d  : 16'bz);
+`endif
     assign cpu_e     = e_pin;         // never tri-stated, as on real silicon
     assign cpu_bg_n  = bg_pin_n;
 
@@ -1322,7 +1362,7 @@ module base64_tg68_top #(
             end
             if (core_rw && !rt_as_n &&
                 (s_vpa_n[1] ? 1'b1 : (!rt_vma_n && e_pin)))
-                rt_rd <= cpu_d;
+                rt_rd <= `TG_D_RD;
             if (tick_r && !rt_as_n && s_berr_n[1]) begin
                 if (!s_dtack_n[1])
                     rt_dtack_lo <= 1'b1;
@@ -1883,5 +1923,8 @@ module base64_tg68_top #(
     assign led_b = ~ext_reset;
 
 endmodule
+`undef TG_D_RD
+`undef TG_RESET_RD
+`undef TG_HALT_RD
 
 `default_nettype wire

@@ -40,6 +40,8 @@ ap.add_argument('--din', type=int, default=1)
 ap.add_argument('--data', type=int, default=2, help='tg68_bus DATA_DELAY')
 ap.add_argument('--asu', type=int, default=1, help='tg68_bus ADDR_SETUP')
 ap.add_argument('--paths', type=int, default=3, help='paths to print per class')
+ap.add_argument('--strip', default='', help='hierarchy prefix to remove from every instance name '
+                '(the dev-board harness has base64_tg68_top as "dut.")')
 args = ap.parse_args()
 T = 1e6 / args.freq                      # ps
 
@@ -73,11 +75,14 @@ def cells(txt):
         m = re.match(r'\s*\(CELLTYPE\s+"([^"]*)"\)\s*\(INSTANCE\s*((?:\\.|[^)\\])*)\)', chunk)
         if m: yield m.group(1), m.group(2), chunk[m.end():]
 
+def strip(name):
+    return name[len(args.strip):] if args.strip and name.startswith(args.strip) else name
+
 for ctype, inst, body in cells(txt):
-    inst = unesc(inst.strip())
+    inst = strip(unesc(inst.strip()))
     if inst == '':
         for a, b, d in ic_re.findall(body):
-            a, b = unesc(a), unesc(b)
+            a, b = strip(unesc(a)), strip(unesc(b))
             edges[a].append((b, dmax(d)))
             if b.endswith('/CLK'):
                 clkpin_delay[b[:-4]] = dmax(d)
