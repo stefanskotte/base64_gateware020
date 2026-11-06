@@ -89,7 +89,8 @@ module sdram_test #(
     // ----------------------------------------------------------- sequencer
     localparam S_WAIT = 0, S_BANNER = 1, S_WALK_W = 2, S_WALK_WA = 3,
                S_WALK_R = 4, S_WALK_RA = 5, S_PSTART = 6, S_WR = 7, S_WRA = 8,
-               S_RD = 9, S_RDA = 10, S_ERR = 11, S_SUM = 12, S_PEND = 13;
+               S_RD = 9, S_RDA = 10, S_ERR = 11, S_SUM = 12, S_PEND = 13,
+               S_CMP = 14, S_WCMP = 15;   // compare one clock after the read data
     reg [3:0]  st, ret;
     reg [5:0]  walk;               // 0..31: walking 1s then walking 0s; 32 = done
     reg        lane;               // type 0 writes: 0 = upper byte, 1 = lower
@@ -107,7 +108,8 @@ module sdram_test #(
     wire [15:0] walk_pat = walk[4] ? ~(16'h1 << walk[3:0]) : (16'h1 << walk[3:0]);
     wire [31:0] lfsr0 = {pass, ~pass} | 32'h1;
     wire [15:0] cur_pat = pat(ptype, addr, seed, lfsr, pass);
-    wire        mism = (rdata != exp_d);
+    reg  [15:0] rd_q;               // read data, registered before the compare
+    wire        mism = (rd_q != exp_d);
 
     reg [7:0] ch;
     reg       ch_end;
@@ -180,12 +182,12 @@ module sdram_test #(
         end
         S_WALK_WA: if (ack) begin req <= 0; st <= S_WALK_R; end
         S_WALK_R:  begin we <= 0; req <= 1; st <= S_WALK_RA; end
-        S_WALK_RA: if (ack) begin
-            req <= 0;
+        S_WALK_RA: if (ack) begin req <= 0; rd_q <= rdata; st <= S_WCMP; end
+        S_WCMP: begin
             if (mism) begin
                 errs <= errs + 1; total_errs <= total_errs + 1;
-                badbits <= badbits | (rdata ^ exp_d); led_r_on <= 1;
-                e_addr <= 0; e_exp <= exp_d; e_got <= rdata;
+                badbits <= badbits | (rd_q ^ exp_d); led_r_on <= 1;
+                e_addr <= 0; e_exp <= exp_d; e_got <= rd_q;
                 st <= S_ERR; ret <= S_WALK_W; ci <= 0;
             end else st <= S_WALK_W;
             walk <= walk + 1'b1;
@@ -206,15 +208,16 @@ module sdram_test #(
             end
         end
         S_RD: begin we <= 0; req <= 1; exp_d <= cur_pat; st <= S_RDA; end
-        S_RDA: if (ack) begin
-            req <= 0; lfsr <= lfsr_nx; addr <= addr + 1'b1;
+        S_RDA: if (ack) begin req <= 0; rd_q <= rdata; st <= S_CMP; end
+        S_CMP: begin
+            lfsr <= lfsr_nx; addr <= addr + 1'b1;
             if (mism) begin
                 errs <= errs + 1; total_errs <= total_errs + 1;
-                badbits <= badbits | (rdata ^ exp_d); led_r_on <= 1;
+                badbits <= badbits | (rd_q ^ exp_d); led_r_on <= 1;
             end
             if (mism && shown != 5'd16) begin
                 shown <= shown + 1'b1;
-                e_addr <= addr; e_exp <= exp_d; e_got <= rdata;
+                e_addr <= addr; e_exp <= exp_d; e_got <= rd_q;
                 st <= S_ERR; ci <= 0;
                 ret <= (addr == LAST) ? S_SUM : S_RD;
             end else if (addr == LAST) begin st <= S_SUM; ci <= 0; ret <= S_PEND; end

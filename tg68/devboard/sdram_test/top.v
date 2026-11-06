@@ -12,7 +12,12 @@ module top (
     output wire        sdram_clk, sdram_cke, sdram_cs_n,
     output wire        sdram_ras_n, sdram_cas_n, sdram_we_n
 );
-`ifdef CLK50
+`ifdef CLK114
+    // x16 evaluation: 114.3 MHz with the timings the x16 harness uses
+    localparam integer HZ = 114_285_714;
+    wire clk, locked;
+    pll_x16 u_pll (.clkin(clk_25m), .clkout0(clk), .locked(locked));
+`elsif CLK50
     localparam integer HZ = 50_000_000;
     wire clk, locked;
     pll_50 u_pll (.clkin(clk_25m), .clkout0(clk), .locked(locked));
@@ -32,7 +37,11 @@ module top (
         .led_r_on(r_on), .led_g_on(g_on), .led_b_on(b_on),
         .req(req), .we(we), .addr(addr), .wdata(wdata), .byte_en(be),
         .ack(ack), .rdata(rdata), .ready(ready));
+`ifdef CLK114
+    sdram_ctrl #(.CLK_HZ(HZ), .CAS_LAT(`CAS), .T_RCD(3), .T_RP(3), .T_RFC(7)) u_sdram (
+`else
     sdram_ctrl #(.CLK_HZ(HZ), .CAS_LAT(2)) u_sdram (
+`endif
         .clk(clk), .reset(rst), .req(req), .we(we), .wr_valid(1'b1),
         .addr(addr), .wdata(wdata), .byte_en(be), .ack(ack), .ack_early(),
         .rdata_live(), .rdata(rdata), .ready(ready),

@@ -61,7 +61,7 @@ def sw(sim):
     run([m68k('objcopy'), '-O', 'binary', 'test.elf', 'test.bin'])
     print('  test.bin: %d bytes' % os.path.getsize(os.path.join(OUT, 'test.bin')))
 
-def sim():
+def sim(x16=False):
     rom()
     sw(True)
     # the bench feeds the program to the loader through the UART pin
@@ -73,8 +73,9 @@ def sim():
     with open(os.path.join(OUT, 'uart_in.len'), 'w') as f:
         f.write('%d\n' % len(pkt))
     vl = [tool('verilator'), '--binary', '--timing', '-Wno-fatal', '-Wno-lint', '-Wno-style',
-          '-Wno-USEBEFOREDECL', '-O2', '--top-module', 'tb', '-DDEVBOARD', '-DSIM',
-          '-DPKT_LEN=%d' % len(pkt), '-DTMAX=%s' % os.environ.get('TMAX', '300ms'), '-o', 'tbh', '--Mdir', 'obj_sim',
+          '-Wno-USEBEFOREDECL', '-O2', '--top-module', 'tb', '-DDEVBOARD', '-DSIM'] + \
+         (['-DX16'] if x16 else []) + [
+          '-DPKT_LEN=%d' % len(pkt), '-DTMAX=%s' % os.environ.get('TMAX', '300ms'), '-o', 'tbh', '--Mdir', 'obj_sim16' if x16 else 'obj_sim',
           os.path.join(HERE, 'sim', 'tb.sv'), os.path.join(HERE, 'harness_top.v'),
           os.path.join(HERE, 'mobo.v'), R('base64_tg68', 'base64_tg68_top.sv'),
           R('base64_tg68', 'tg68_bus.v'), R('tg68', 'tg68_020_b0.v'),
@@ -85,14 +86,15 @@ def sim():
     for f in ('turbomem.mem', 'sfsd.mem'):
         shutil.copy(R('base64_fx68k', f), OUT)
     run(vl, stdout=open(os.path.join(OUT, 'sim_build.log'), 'w'), stderr=subprocess.STDOUT)
-    run([os.path.join(OUT, 'obj_sim', 'tbh')])
+    run([os.path.join(OUT, 'obj_sim16' if x16 else 'obj_sim', 'tbh')])
 
-def bit(seed, seeds=1):
+def bit(seed, seeds=1, x16=False):
+    name = 'tg68_harness_x16' if x16 else 'tg68_harness'
     rom()
     for f in ('turbomem.mem', 'sfsd.mem'):
         shutil.copy(R('base64_fx68k', f), OUT)
     srcs_v = [os.path.join(HERE, f) for f in ('harness_top.v', 'mobo.v')] + \
-             [os.path.join(HERE, '..', 'sdram_test', 'pll_86.v'),
+             [os.path.join(HERE, '..', 'sdram_test', 'pll_86.v'), os.path.join(HERE, 'pll_x16.v'),
               R('base64_tg68', 'tg68_bus.v'), R('tg68', 'tg68_020_b0.v')] + \
              [R('base64_fx68k', f + '.v') for f in
               ('autoconfig_zii', 'fastmem_zii', 'turbomem_zii', 'sd_subsystem', 'sdcard',
@@ -101,6 +103,7 @@ def bit(seed, seeds=1):
     script = ['read_verilog -DDEVBOARD -sv ' + R('base64_tg68', 'base64_tg68_top.sv')] + \
              ['read_verilog -DDEVBOARD ' + f for f in srcs_v] + [
         'read_verilog -lib +/ecp5/cells_bb.v',
+        'chparam -set X16 %d harness_top' % (1 if x16 else 0),
         'hierarchy -top harness_top',
         # the bridge asks for its pin registers to go in the I/O flip-flops;
         # here they drive mobo.v, not pins, so that cannot be honoured
@@ -112,12 +115,12 @@ def bit(seed, seeds=1):
         'opt_clean -purge',
         'delete t:$scopeinfo',
         'attrmap -remove syn_useioff',
-        'write_json tg68_harness.json',
-        'tee -o utilisation.txt stat']
-    open(os.path.join(OUT, 'synth.ys'), 'w').write('\n'.join(script) + '\n')
-    run([os.environ.get('YOSYS') or tool('yosys'), '-q', '-l', 'yosys.log', '-s', 'synth.ys'])
+        'write_json %s.json' % name,
+        'tee -o %s_utilisation.txt stat' % name]
+    open(os.path.join(OUT, name + '.ys'), 'w').write('\n'.join(script) + '\n')
+    run([os.environ.get('YOSYS') or tool('yosys'), '-q', '-l', name + '_yosys.log', '-s', name + '.ys'])
     import json
-    top = json.load(open(os.path.join(OUT, 'tg68_harness.json')))['modules']['harness_top']
+    top = json.load(open(os.path.join(OUT, name + '.json')))['modules']['harness_top']
     # sd_cmd (MOSI) and sd_d[3] (chip select) are outputs in SPI mode; with
     # ENABLE_SD=0 they sit at a constant idle level, which is harmless.
     lost = ['%s[%d]' % (p, i) for p, v in top['ports'].items() if v['direction'] == 'inout'
@@ -128,27 +131,30 @@ def bit(seed, seeds=1):
     for seed in range(seed, seed + seeds):
         print('== nextpnr seed %d' % seed, flush=True)
         run([os.environ.get('NEXTPNR') or tool('nextpnr-ecp5'), '--25k', '--package', 'CABGA256', '--speed', '6',
-             '--json', 'tg68_harness.json', '--lpf', os.path.join(HERE, 'harness.lpf'),
-             '--textcfg', 'tg68_harness.config', '--sdf', 'tg68_harness.sdf',
-             '--report', 'report.json', '--timing-allow-fail', '--router', 'router2',
+             '--json', name + '.json', '--lpf', os.path.join(HERE, 'harness.lpf'),
+             '--textcfg', name + '.config', '--sdf', name + '.sdf',
+             '--report', name + '_report.json', '--timing-allow-fail', '--router', 'router2',
              '--placer', os.environ.get('PLACER', 'static'), '--seed', str(seed),
-             '-l', 'nextpnr.log'])
+             '-l', name + '_nextpnr.log'])
         # the multicycle check, with the harness's extra hierarchy level removed
         r = subprocess.run([sys.executable, os.path.join(TG, 'scripts', 'check_timing.py'),
-                            'tg68_harness.sdf', '--strip', 'dut.'], cwd=OUT, capture_output=True, text=True)
-        open(os.path.join(OUT, 'timing.txt'), 'w').write(r.stdout + r.stderr)
+                            name + '.sdf', '--strip', 'dut.'] +
+                           (['--freq', '114.29', '--step', '5', '--settle', '4'] if x16 else []),
+                           cwd=OUT, capture_output=True, text=True)
+        open(os.path.join(OUT, name + '_timing.txt'), 'w').write(r.stdout + r.stderr)
         print('\n'.join(r.stdout.splitlines()[:6]))
         if r.returncode == 0:
             break
-    run([os.environ.get('ECPPACK') or tool('ecppack'), 'tg68_harness.config', 'tg68_harness.bit'])
-    print('== done: build/tg68_harness.bit' + ('' if r.returncode == 0 else
-          '   (WARNING: check_timing.py did not pass, see build/timing.txt)'))
+    run([os.environ.get('ECPPACK') or tool('ecppack'), name + '.config', name + '.bit'])
+    print('== done: build/%s.bit' % name + ('' if r.returncode == 0 else
+          '   (WARNING: check_timing.py did not pass, see build/%s_timing.txt)' % name))
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('what', choices=('rom', 'sw', 'sim', 'bit'))
 ap.add_argument('--sim', action='store_true', help='sw: build the short simulation variant')
+ap.add_argument('--x16', action='store_true', help='sim/bit: 16 master clocks per 7M (114.3 MHz)')
 ap.add_argument('--seed', type=int, default=5)   # see README: Timing
 ap.add_argument('--seeds', type=int, default=1, help='bit: try seeds until check_timing passes')
 a = ap.parse_args()
 os.makedirs(OUT, exist_ok=True)
-{'rom': rom, 'sw': lambda: sw(a.sim), 'sim': sim, 'bit': lambda: bit(a.seed, a.seeds)}[a.what]()
+{'rom': rom, 'sw': lambda: sw(a.sim), 'sim': lambda: sim(a.x16), 'bit': lambda: bit(a.seed, a.seeds, a.x16)}[a.what]()

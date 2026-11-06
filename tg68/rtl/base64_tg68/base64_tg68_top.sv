@@ -93,6 +93,17 @@ module base64_tg68_top #(
     //   4 -> 3, 3 -> 4, 2 -> 6, 1 -> 12 (bit-identical to the old build)
     // See DESIGN_NOTES: only CPU_MULT<=3 relaxes the fx68k Fmax requirement.
     parameter integer CPU_MULT   = 6,
+    // TG68: master clocks per 7M period and the master clock frequency.
+    // The Base64's ICS570B gives x12 (S0/S1 open). x16 is being evaluated
+    // on the dev-board harness (tg68/devboard/tg68_harness); CPU_MULT must
+    // divide CLK_MULT and the SDRAM timings below scale with CLK_HZ.
+    parameter integer CLK_MULT   = 12,
+    parameter integer CLK_HZ     = 85_130_000,
+    parameter integer SD_CAS     = 2,     // SDRAM timings, in master clocks
+    parameter integer SD_TRCD    = 2,
+    parameter integer SD_TRP     = 2,
+    parameter integer SD_TRAS    = 5,
+    parameter integer SD_TRFC    = 6,
 
     // ---- 7M grid alignment ----------------------------------------------
     // Larger PHASE_OFS moves our S-state grid EARLIER relative to the real
@@ -312,7 +323,6 @@ module base64_tg68_top #(
     // DESIGN_NOTES_6x.md before raising it: doubling the master clock does
     // NOT buy fx68k any settling time, it only makes STA harder. The real
     // lever is the multicycle constraints in base64_6x.fdc.
-    localparam integer CLK_MULT = 12;
     localparam [4:0] PH_TOP = CLK_MULT[4:0] - 5'd1;      // counter wrap
     localparam [4:0] PH_HALF= CLK_MULT[4:0] / 5'd2;      // "falling edge"
     localparam [4:0] MC4    = CLK_MULT[4:0] / CPU_MULT;      // 2,3,4,6,12
@@ -699,7 +709,7 @@ module base64_tg68_top #(
     //
     // `make cfgdump` prints them. Log a few dozen cold starts and the delay
     // question answers itself with numbers instead of blink-counting.
-    localparam [16:0] MS_TOP = 17'd85129;    // 1 ms at 85.13 MHz
+    localparam [16:0] MS_TOP = CLK_HZ / 1000 - 1;  // 1 ms (85129 at 85.13 MHz)
 
     reg [16:0] ms_div  = 17'd0;
     reg [15:0] ms_cnt  = 16'd0;
@@ -1742,7 +1752,8 @@ module base64_tg68_top #(
     // TG68: the SDRAM controller only exists with fast RAM. Without it the
     // chip is held deselected with its clock disabled.
     generate if (ENABLE_FASTMEM) begin : g_sdram
-    sdram_ctrl #(.CLK_HZ(85_130_000), .CAS_LAT(2)) u_sdram (
+    sdram_ctrl #(.CLK_HZ(CLK_HZ), .CAS_LAT(SD_CAS), .T_RCD(SD_TRCD), .T_RP(SD_TRP),
+                 .T_RAS(SD_TRAS), .T_RFC(SD_TRFC)) u_sdram (
         .clk (clk), .reset (slave_reset),
         .req (sd_req), .we (sd_we), .wr_valid (sd_wr_valid),
         .addr (sd_saddr), .wdata (sd_wdata), .byte_en (sd_byte_en),

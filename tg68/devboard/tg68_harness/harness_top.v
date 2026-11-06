@@ -10,7 +10,10 @@
 `default_nettype none
 module harness_top #(
     parameter integer PWRUP_BIT = 25,
-    parameter integer BAUD      = 115_200
+    parameter integer BAUD      = 115_200,
+    // X16=1: 16 master clocks per 7M instead of 12 (114.3 MHz instead of
+    // 85.7 MHz, same 7.14 MHz 7M). Evaluation of the ICS570B x16 setting.
+    parameter         X16       = 1'b0
 )(
     input  wire        clk_25m,
     output wire        uart_tx,
@@ -32,22 +35,28 @@ module harness_top #(
     output wire        led_g,
     output wire        led_b
 );
+    localparam integer MULT   = X16 ? 16 : 12;
+    localparam integer CLK_HZ = X16 ? 114_285_714 : 85_714_286;
     wire clk;
 `ifdef SIM
-    assign clk = clk_25m;           // the bench supplies 85.7 MHz directly
+    assign clk = clk_25m;           // the bench supplies the master clock
 `else
-    pll_86 u_pll (.clkin(clk_25m), .clkout0(clk), .locked());
+    generate if (X16) begin : g_pll16
+        pll_x16 u_pll (.clkin(clk_25m), .clkout0(clk), .locked());
+    end else begin : g_pll12
+        pll_86  u_pll (.clkin(clk_25m), .clkout0(clk), .locked());
+    end endgenerate
 `endif
 
-    // 7M: 12 master clocks, high for 6 (what the ICS570B pair gives)
-    reg [3:0] div = 0;
+    // 7M: MULT master clocks, high for half (what the ICS570B pair gives)
+    reg [4:0] div = 0;
     reg       clk7 = 1'b0;
     always @(posedge clk) begin
-        div <= (div == 4'd11) ? 4'd0 : div + 4'd1;
-        if (div == 4'd0) clk7 <= 1'b1;
-        if (div == 4'd6) clk7 <= 1'b0;
+        div <= (div == MULT - 1) ? 5'd0 : div + 5'd1;
+        if (div == 5'd0)     clk7 <= 1'b1;
+        if (div == MULT / 2) clk7 <= 1'b0;
     end
-    wire ce7 = (div == 4'd1);       // just after the 7M rising edge
+    wire ce7 = (div == 5'd1);       // just after the 7M rising edge
 
     // harness reset: hold the board model for a few clocks after config
     reg [3:0] rcnt = 0;
@@ -66,7 +75,19 @@ module harness_top #(
     base64_tg68_top #(
         .ENABLE_FASTMEM(1'b1), .ENABLE_SD(1'b0),
         .FORCE_RETRY_MS(0), .COLD_RETRY(1'b0), .PASSIVE_EN(1'b0),
-        .PWRUP_BIT(PWRUP_BIT)
+        .PWRUP_BIT(PWRUP_BIT),
+        .CLK_MULT(MULT), .CLK_HZ(CLK_HZ),
+        // x16: same nanoseconds where it matters, more clocks
+        //   CPU_MULT must divide CLK_MULT (fx68k legacy, unused by TG68)
+        //   STEP 5 = 43.8 ns for the kernel's ~41 ns internal paths
+        //   SETTLE 4 = 35 ns for kernel outputs (~32 ns) to settle
+        //   DTACK_LAT: the sample point moves with the half period
+        //   SDRAM: tRCD/tRP 20 ns -> 3 clocks, tRC 60 ns -> 7 clocks
+        .CPU_MULT(X16 ? 8 : 6),
+        .TG_STEP(X16 ? 5 : 4), .TG_SETTLE(X16 ? 4 : 3),
+        .DTACK_LAT(X16 ? 5 : 4),
+        .SD_CAS(2), .SD_TRCD(X16 ? 3 : 2), .SD_TRP(X16 ? 3 : 2),
+        .SD_TRAS(5), .SD_TRFC(X16 ? 7 : 6)
     ) dut (
         .clk_7m(clk7), .clk_12x(clk),
         .cpu_a(a), .cpu_d(d_cpu), .cpu_d_oe(d_oe), .cpu_d_in(d_bus),
@@ -86,7 +107,7 @@ module harness_top #(
         .sd_clk(sd_clk), .sd_cmd(sd_cmd), .sd_d(sd_d),
         .led_r(lr), .led_g(lg), .led_b(lb));
 
-    mobo #(.BAUD(BAUD)) u_mobo (
+    mobo #(.BAUD(BAUD), .CLK_HZ(CLK_HZ)) u_mobo (
         .clk(clk), .rst(mb_rst), .ce7(ce7),
         .a(a), .d_cpu(d_cpu), .d_cpu_oe(d_oe), .d_bus(d_bus),
         .as_n(as_n), .uds_n(uds_n), .lds_n(lds_n), .rw(rw), .fc(fc),

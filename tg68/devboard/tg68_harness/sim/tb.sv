@@ -9,9 +9,17 @@
 `endif
 module tb;
     localparam integer BAUD = 1_000_000;      // fast UART for simulation
-    localparam integer DIV  = 85_714_286 / BAUD;
+`ifdef X16
+    localparam integer DIV  = 114_285_714 / BAUD;
+    localparam         X16  = 1'b1;
     reg clk = 0;
-    always #5.833 clk = ~clk;                 // 85.7 MHz
+    always #4.375 clk = ~clk;                 // 114.3 MHz (16 x 7.14 MHz)
+`else
+    localparam integer DIV  = 85_714_286 / BAUD;
+    localparam         X16  = 1'b0;
+    reg clk = 0;
+    always #5.833 clk = ~clk;                 // 85.7 MHz (12 x 7.14 MHz)
+`endif
 
     wire tx; reg rx = 1;
     wire [12:0] sa; wire [1:0] sba, sdqm; wire [15:0] sdq;
@@ -19,7 +27,7 @@ module tb;
     wire lr, lg, lb;
     wire sd_cmd; wire [3:0] sd_d;
 
-    harness_top #(.PWRUP_BIT(12), .BAUD(BAUD)) dut (
+    harness_top #(.PWRUP_BIT(12), .BAUD(BAUD), .X16(X16)) dut (
         .clk_25m(clk), .uart_tx(tx), .uart_rx(rx),
         .sdram_a(sa), .sdram_ba(sba), .sdram_dq(sdq), .sdram_dqm(sdqm),
         .sdram_clk(sclk), .sdram_cke(scke), .sdram_ras_n(sras),

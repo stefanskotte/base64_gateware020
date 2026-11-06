@@ -112,13 +112,14 @@ module mobo #(
         end else rx_cnt <= rx_cnt - 1;
     end
 
-    // ---- microsecond counter: 7 / 600 of a clock = 1 us at 85.714 MHz ----
-    reg [9:0]  us_acc = 0;
+    // ---- microsecond counter: count kHz, tick when a MHz has gone by ------
+    localparam integer CLK_KHZ = CLK_HZ / 1000;
+    reg [17:0] us_acc = 0;
     reg [31:0] us = 0;
     reg [15:0] us_lo_l = 0;
     always @(posedge clk)
-        if (us_acc >= 10'd593) begin us_acc <= us_acc + 10'd7 - 10'd600; us <= us + 1; end
-        else us_acc <= us_acc + 10'd7;
+        if (us_acc + 18'd1000 >= CLK_KHZ) begin us_acc <= us_acc + 18'd1000 - CLK_KHZ; us <= us + 1; end
+        else us_acc <= us_acc + 18'd1000;
 
     // ---- interrupts ------------------------------------------------------
     reg [2:0] ipl_lvl = 3'd0;
